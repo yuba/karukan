@@ -13,6 +13,7 @@ mod guard;
 mod init;
 mod input;
 mod input_buffer;
+mod keymap;
 mod mode;
 mod model;
 mod strategy;
@@ -168,6 +169,8 @@ pub struct InputMethodEngine {
     /// Drained by `poll_loaded_models` at the top of `process_key`; until
     /// then (or if loading failed) the engine runs dictionary/kana-only.
     model_loading: Option<std::sync::mpsc::Receiver<init::LoadedConverters>>,
+    /// User key bindings (`keymap.toml`), see [`keymap`]
+    keymap: keymap::KeymapState,
 }
 
 impl InputMethodEngine {
@@ -197,6 +200,7 @@ impl InputMethodEngine {
             dicts: Dictionaries::default(),
             learning: None,
             model_loading: None,
+            keymap: keymap::KeymapState::default(),
         }
     }
 
@@ -667,6 +671,11 @@ impl InputMethodEngine {
         let start = std::time::Instant::now();
         // conversion_ms reports this key only: 0 unless a conversion runs below
         self.metrics.conversion_ms = 0;
+
+        if let Some(result) = self.process_keymap(key) {
+            self.metrics.process_key_ms = start.elapsed().as_millis() as u64;
+            return result;
+        }
 
         let result = match &self.state {
             InputState::Empty => self.process_key_empty(key),

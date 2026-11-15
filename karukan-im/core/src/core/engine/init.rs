@@ -94,6 +94,7 @@ impl InputMethodEngine {
             },
         );
 
+        self.keymap.keymap = super::keymap::Keymap::load();
         self.spawn_model_loading(settings);
         Ok(())
     }
