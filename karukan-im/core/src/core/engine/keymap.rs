@@ -5,14 +5,14 @@
 //! "Ctrl+U" = "hiragana"
 //! "Ctrl+I" = "katakana"
 //! "Ctrl+P" = "alphanumeric_full"
-//! "Ctrl+O" = "alphanumeric_half"
+//! "Ctrl+O" = "toggle_width"
 //! ```
 //!
 //! A binding is checked before the built-in key handling while composing or
 //! converting, so it overrides a built-in binding of the same chord. With
 //! nothing composed the key is left alone, so the application keeps it.
 //!
-//! The conversions (ATOK-style Ctrl+U/I/P/O) open the conversion window on
+//! The conversions (ATOK-style Ctrl+U/I/P, and Ctrl+O flipping the width) open the conversion window on
 //! the converted text, so Enter commits it and Escape returns to the
 //! composition untouched. The alphanumeric ones use the keys actually typed
 //! (`kd` stays `kd` even when the romaji table turns it into けん); when the
@@ -38,6 +38,10 @@ pub(super) enum KeyAction {
     AlphanumericFull,
     /// The typed keys, half-width (ABC)
     AlphanumericHalf,
+    /// Flip the shown text between full and half width (ATOK Ctrl+O):
+    /// katakana ⇄ half-width katakana (hiragana goes to half-width
+    /// katakana), full-width ⇄ half-width alphanumerics
+    ToggleWidth,
     /// Open the 🤖 AI candidate view (built-in Ctrl+I)
     AiCandidates,
     /// Switch to katakana input mode (built-in Ctrl+K)
@@ -51,6 +55,7 @@ impl KeyAction {
             "katakana" => Self::Katakana,
             "alphanumeric_full" => Self::AlphanumericFull,
             "alphanumeric_half" | "alphanumeric" => Self::AlphanumericHalf,
+            "toggle_width" => Self::ToggleWidth,
             "ai_candidates" => Self::AiCandidates,
             "katakana_mode" => Self::KatakanaMode,
             _ => return None,
@@ -211,6 +216,18 @@ impl Keymap {
     }
 }
 
+/// The whole composition in each rendering the conversions offer.
+struct Forms {
+    reading: String,
+    hiragana: String,
+    katakana: String,
+    half_katakana: String,
+    /// Typed keys, full-width
+    full: String,
+    /// Typed keys as typed
+    typed: String,
+}
+
 /// Per-engine keymap state: the bindings plus the keystrokes typed into the
 /// current composition (for the alphanumeric conversions).
 #[derive(Debug, Clone, Default)]
@@ -249,6 +266,7 @@ impl InputMethodEngine {
         match action {
             KeyAction::AiCandidates => self.jump_to_source(CandidateSource::Model),
             KeyAction::KatakanaMode => self.enter_katakana_mode(),
+            KeyAction::ToggleWidth => self.toggle_width(),
             _ => self.convert_whole(action),
         }
     }
@@ -256,43 +274,104 @@ impl InputMethodEngine {
     /// Open the conversion window on the whole composition rendered as
     /// `action`, followed by the other renderings.
     fn convert_whole(&mut self, action: KeyAction) -> EngineResult {
+        let Some(forms) = self.composition_forms() else {
+            return EngineResult::consumed();
+        };
+        let first = match action {
+            KeyAction::Katakana => forms.katakana.clone(),
+            KeyAction::AlphanumericFull => forms.full.clone(),
+            KeyAction::AlphanumericHalf => forms.typed.clone(),
+            _ => forms.hiragana.clone(),
+        };
+        self.open_forms(first, forms)
+    }
+
+    /// Flip the width of what is shown: the selected candidate while
+    /// converting, the hiragana while composing.
+    fn toggle_width(&mut self) -> EngineResult {
+        let Some(forms) = self.composition_forms() else {
+            return EngineResult::consumed();
+        };
+        let current = match &self.state {
+            InputState::Conversion { candidates, .. } => candidates
+                .selected_text()
+                .map(str::to_string)
+                .unwrap_or_else(|| forms.hiragana.clone()),
+            _ => forms.hiragana.clone(),
+        };
+        let next = if current == forms.hiragana || current == forms.katakana {
+            forms.half_katakana.clone()
+        } else if current == forms.half_katakana {
+            forms.katakana.clone()
+        } else if current == forms.full {
+            forms.typed.clone()
+        } else if current == forms.typed {
+            forms.full.clone()
+        } else {
+            let half = karukan_engine::width::to_half_width(&current);
+            if half != current {
+                half
+            } else {
+                karukan_engine::width::to_full_width(&current)
+            }
+        };
+        self.open_forms(next, forms)
+    }
+
+    /// Every whole-composition rendering, or `None` with nothing composed.
+    fn composition_forms(&self) -> Option<Forms> {
         let reading = self.input_buf.settled_reading(&self.converters.romaji);
         if reading.is_empty() {
-            return EngineResult::consumed();
+            return None;
         }
-        self.live.shown = false;
-
         let hiragana = karukan_engine::katakana_to_hiragana(&reading);
         let katakana = karukan_engine::hiragana_to_katakana(&hiragana);
+        let half_katakana = karukan_engine::kana::katakana_to_half_width(&katakana);
         let typed = self.typed_keys(&hiragana);
         let full = to_fullwidth(&typed);
+        Some(Forms {
+            reading,
+            hiragana,
+            katakana,
+            half_katakana,
+            full,
+            typed,
+        })
+    }
 
-        // Kana forms learn like the built-in kana fallbacks; the typed-key
-        // forms carry no reading, so committing them is never learned.
-        let kana = |text: &str| Candidate {
-            reading: Some(reading.clone()),
-            source: Some(CandidateSource::Fallback),
-            ..Candidate::new(text)
-        };
-        let order = match action {
-            KeyAction::Katakana => [&katakana, &hiragana, &full, &typed],
-            KeyAction::AlphanumericFull => [&full, &typed, &hiragana, &katakana],
-            KeyAction::AlphanumericHalf => [&typed, &full, &hiragana, &katakana],
-            _ => [&hiragana, &katakana, &full, &typed],
-        };
+    /// Open the conversion window with `first` selected, followed by the
+    /// other renderings.
+    fn open_forms(&mut self, first: String, forms: Forms) -> EngineResult {
+        self.live.shown = false;
+        let kana = [&forms.hiragana, &forms.katakana, &forms.half_katakana];
+        let order = [
+            &first,
+            &forms.hiragana,
+            &forms.katakana,
+            &forms.half_katakana,
+            &forms.full,
+            &forms.typed,
+        ];
         let mut seen = std::collections::HashSet::new();
         let candidates: Vec<Candidate> = order
             .into_iter()
             .filter(|t| seen.insert(t.as_str()))
             .map(|t| {
-                if *t == hiragana || *t == katakana {
-                    kana(t)
+                // Kana forms learn like the built-in kana fallbacks; the
+                // others carry no reading, so committing them is never
+                // learned.
+                if kana.contains(&t) {
+                    Candidate {
+                        reading: Some(forms.reading.clone()),
+                        source: Some(CandidateSource::Fallback),
+                        ..Candidate::new(t.as_str())
+                    }
                 } else {
                     Candidate::new(t.as_str())
                 }
             })
             .collect();
-        self.enter_conversion_state(&reading, CandidateList::new(candidates))
+        self.enter_conversion_state(&forms.reading, CandidateList::new(candidates))
     }
 
     /// The keys typed for this composition, when replaying them reproduces

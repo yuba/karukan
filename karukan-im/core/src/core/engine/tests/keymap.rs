@@ -10,6 +10,7 @@ const ATOK: &str = r#"
 "Ctrl+I" = "katakana"
 "Ctrl+P" = "alphanumeric_full"
 "Ctrl+O" = "alphanumeric_half"
+"Ctrl+Y" = "toggle_width"
 "#;
 
 fn engine() -> InputMethodEngine {
@@ -162,4 +163,21 @@ fn romanize_and_fullwidth() {
     assert_eq!(romanize("しんや"), "shinnya");
     assert_eq!(romanize("かんじ、ー"), "kanji,-");
     assert_eq!(to_fullwidth("ab 1!"), "ａｂ\u{3000}１！");
+}
+
+#[test]
+fn toggle_width_flips_kana_and_alphanumerics() {
+    let mut e = engine();
+    type_str(&mut e, "kanji");
+    // Composing hiragana → half-width katakana, as ATOK does
+    e.process_key(&ctrl('y'));
+    assert_eq!(e.preedit().unwrap().text(), "ｶﾝｼﾞ");
+    e.process_key(&ctrl('y'));
+    assert_eq!(e.preedit().unwrap().text(), "カンジ");
+    e.process_key(&ctrl('p'));
+    assert_eq!(e.preedit().unwrap().text(), "ｋａｎｊｉ");
+    e.process_key(&ctrl('y'));
+    assert_eq!(e.preedit().unwrap().text(), "kanji");
+    e.process_key(&ctrl('y'));
+    assert_eq!(e.preedit().unwrap().text(), "ｋａｎｊｉ");
 }
