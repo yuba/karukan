@@ -58,8 +58,8 @@ impl KeyAction {
     }
 }
 
-/// A key chord such as `Ctrl+U`. Letters are stored lowercase; Shift is a
-/// separate flag, since fcitx5 may report Shift+u as either `U` or `u`+Shift.
+/// A key chord such as `Ctrl+U`. Letters are stored lowercase and Shift is
+/// only the modifier flag (see [`Chord::of_event`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct Chord {
     keysym: u32,
@@ -104,19 +104,19 @@ impl Chord {
     }
 
     fn of_event(key: &KeyEvent) -> Self {
-        let mut keysym = key.keysym.0;
-        let mut shift = key.modifiers.shift_key;
-        if let Some(c) = char::from_u32(keysym)
-            && c.is_ascii_uppercase()
-        {
-            keysym = c.to_ascii_lowercase() as u32;
-            shift = true;
-        }
+        // fcitx5 hands Ctrl+letter over as the uppercase keysym without
+        // Shift (Ctrl+I arrives as `I`), so the case says nothing about
+        // Shift: like the built-in bindings, match letters either way and
+        // take Shift from the modifier state alone.
+        let keysym = match char::from_u32(key.keysym.0) {
+            Some(c) => c.to_ascii_lowercase() as u32,
+            None => key.keysym.0,
+        };
         Chord {
             keysym,
             control: key.modifiers.control_key,
             alt: key.modifiers.alt_key,
-            shift,
+            shift: key.modifiers.shift_key,
             super_: key.modifiers.super_key,
         }
     }

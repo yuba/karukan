@@ -120,16 +120,29 @@ fn unbound_engine_keeps_builtin_ctrl_i() {
 }
 
 #[test]
-fn chord_with_shift_is_distinct() {
+fn uppercase_keysym_from_fcitx5_still_matches() {
+    // fcitx5 sends Ctrl+I as keysym `I` with only Control set.
+    let mut e = engine();
+    type_str(&mut e, "kanji");
+    assert!(e.process_key(&ctrl('I')).consumed);
+    assert_eq!(e.preedit().unwrap().text(), "カンジ");
+}
+
+#[test]
+fn shift_comes_from_the_modifier_flag() {
     let map = Keymap::parse("[bindings]\n\"Ctrl+Shift+U\" = \"katakana\"\n").unwrap();
     let mut e = InputMethodEngine::new();
     e.keymap.keymap = map;
     type_str(&mut e, "kana");
-    // Plain Ctrl+U is not bound
-    e.process_key(&ctrl('u'));
-    assert_ne!(e.preedit().unwrap().text(), "カナ");
-    // fcitx5 may fold Shift into an uppercase keysym
+    // Plain Ctrl+U (in either case) is not bound
     e.process_key(&ctrl('U'));
+    assert_ne!(e.preedit().unwrap().text(), "カナ");
+    let ctrl_shift_u = KeyEvent::new(
+        Keysym('U' as u32),
+        KeyModifiers::new().with_control(true).with_shift(true),
+        true,
+    );
+    e.process_key(&ctrl_shift_u);
     assert_eq!(e.preedit().unwrap().text(), "カナ");
 }
 
