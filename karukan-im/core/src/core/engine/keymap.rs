@@ -170,12 +170,23 @@ const SHIFT_TAP: u32 = 0xffe1;
 #[derive(Debug, Clone, Default)]
 pub(super) struct Keymap {
     bindings: HashMap<Chord, KeyAction>,
+    /// `[options] uppercase_alphabet_lock`, see [`AlphabetLock`]
+    uppercase_alphabet_lock: bool,
 }
 
 #[derive(serde::Deserialize)]
 struct KeymapFile {
     #[serde(default)]
     bindings: HashMap<String, String>,
+    #[serde(default)]
+    options: KeymapOptions,
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct KeymapOptions {
+    #[serde(default)]
+    uppercase_alphabet_lock: bool,
 }
 
 impl Keymap {
@@ -214,7 +225,10 @@ impl Keymap {
                 (_, None) => tracing::warn!("keymap.toml: unknown action {action:?}"),
             }
         }
-        Ok(Self { bindings })
+        Ok(Self {
+            bindings,
+            uppercase_alphabet_lock: file.options.uppercase_alphabet_lock,
+        })
     }
 
     fn lookup(&self, key: &KeyEvent) -> Option<KeyAction> {
@@ -245,6 +259,22 @@ pub(super) struct KeymapState {
     typed: String,
     /// A Shift key is down and nothing else was pressed since
     shift_tap_armed: bool,
+    /// Progress towards / state of the uppercase alphabet lock
+    alphabet_lock: AlphabetLock,
+}
+
+/// ATOK's uppercase alphabet lock (`[options] uppercase_alphabet_lock`):
+/// a second Shift+letter while Shift is still held from the one that
+/// entered alphabet mode (`NHK`) locks uppercase input, which an unshifted
+/// letter then leaves — that letter starting the next romaji.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum AlphabetLock {
+    #[default]
+    Off,
+    /// Shift+letter just entered alphabet mode and Shift is still held
+    Armed,
+    /// Uppercase lock: an unshifted letter returns to hiragana
+    Locked,
 }
 
 impl InputMethodEngine {
@@ -257,6 +287,7 @@ impl InputMethodEngine {
         if !key.is_press {
             return None;
         }
+        self.track_alphabet_lock(key);
         let action = self.keymap.keymap.lookup(key);
         let Some(action) = action.filter(|_| !matches!(self.state, InputState::Empty)) else {
             self.record_keystroke(key);
@@ -281,6 +312,10 @@ impl InputMethodEngine {
             self.keymap.shift_tap_armed = !(m.control_key || m.alt_key || m.super_key);
             return None;
         }
+        // Letting go of Shift before a second letter: plain alphabet mode
+        if self.keymap.alphabet_lock == AlphabetLock::Armed {
+            self.keymap.alphabet_lock = AlphabetLock::Off;
+        }
         if !std::mem::take(&mut self.keymap.shift_tap_armed) {
             return None;
         }
@@ -295,6 +330,33 @@ impl InputMethodEngine {
         let mut result = self.run_key_action(action);
         result.consumed = false;
         Some(result)
+    }
+
+    /// Advance [`AlphabetLock`] on a key press, before the built-in
+    /// handling sees it. Leaving the lock switches to hiragana here, so the
+    /// built-in handling then reads the letter as romaji.
+    fn track_alphabet_lock(&mut self, key: &KeyEvent) {
+        if !self.keymap.keymap.uppercase_alphabet_lock {
+            return;
+        }
+        let in_alphabet = self.mode.current() == InputMode::Alphabet;
+        let letter = key
+            .to_char()
+            .filter(|c| c.is_ascii_alphabetic() && !key.modifiers.super_key);
+        // The same test the built-in handling uses to enter alphabet mode
+        let shifted = letter.is_some_and(|c| c.is_ascii_uppercase() || key.modifiers.shift_key);
+        self.keymap.alphabet_lock = match (self.keymap.alphabet_lock, in_alphabet) {
+            // Shift+letter is about to enter alphabet mode
+            (_, false) if shifted => AlphabetLock::Armed,
+            (_, false) => AlphabetLock::Off,
+            (AlphabetLock::Armed, true) if shifted => AlphabetLock::Locked,
+            (AlphabetLock::Locked, true) if letter.is_some() && !shifted => {
+                self.handle_mode_toggle_key(&KeyEvent::press(Keysym::HENKAN));
+                AlphabetLock::Off
+            }
+            (AlphabetLock::Locked, true) => AlphabetLock::Locked,
+            (_, true) => AlphabetLock::Off,
+        };
     }
 
     fn record_keystroke(&mut self, key: &KeyEvent) {

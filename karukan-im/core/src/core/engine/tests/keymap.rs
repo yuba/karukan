@@ -233,3 +233,70 @@ fn shift_in_a_chord_is_not_a_tap() {
     e.process_key(&shift_release());
     assert!(e.mode.current() == InputMode::Alphabet);
 }
+
+fn engine_with_alphabet_lock(enabled: bool) -> InputMethodEngine {
+    let mut e = InputMethodEngine::new();
+    e.keymap.keymap = Keymap::parse(&format!(
+        "[bindings]\n\"Shift\" = \"hiragana_mode\"\n[options]\nuppercase_alphabet_lock = {enabled}\n"
+    ))
+    .unwrap();
+    e
+}
+
+/// Hold Shift, type `letters` with it, let go.
+fn shifted(e: &mut InputMethodEngine, letters: &str) {
+    e.process_key(&press_key(Keysym::SHIFT_L));
+    for c in letters.chars() {
+        e.process_key(&press_shift(c));
+    }
+    e.process_key(&shift_release());
+}
+
+#[test]
+fn second_shifted_letter_locks_uppercase_and_a_lowercase_letter_leaves() {
+    let mut e = engine_with_alphabet_lock(true);
+    shifted(&mut e, "NHK");
+    assert!(e.mode.current() == InputMode::Alphabet);
+    // The unshifted k leaves the lock and starts the romaji
+    type_str(&mut e, "ka");
+    assert!(e.mode.current() == InputMode::Hiragana);
+    assert_eq!(e.preedit().unwrap().text(), "NHKか");
+}
+
+#[test]
+fn single_shifted_letter_is_plain_alphabet_mode() {
+    let mut e = engine_with_alphabet_lock(true);
+    shifted(&mut e, "L");
+    type_str(&mut e, "inux");
+    assert!(e.mode.current() == InputMode::Alphabet);
+    assert_eq!(e.preedit().unwrap().text(), "Linux");
+}
+
+#[test]
+fn releasing_shift_before_the_second_letter_does_not_lock() {
+    let mut e = engine_with_alphabet_lock(true);
+    shifted(&mut e, "N");
+    shifted(&mut e, "H");
+    type_str(&mut e, "a");
+    assert!(e.mode.current() == InputMode::Alphabet);
+    assert_eq!(e.preedit().unwrap().text(), "NHa");
+}
+
+#[test]
+fn uppercase_lock_is_off_by_default() {
+    let mut e = engine_with_alphabet_lock(false);
+    shifted(&mut e, "NHK");
+    type_str(&mut e, "ka");
+    assert!(e.mode.current() == InputMode::Alphabet);
+    assert_eq!(e.preedit().unwrap().text(), "NHKka");
+}
+
+#[test]
+fn shift_tap_still_leaves_the_uppercase_lock() {
+    let mut e = engine_with_alphabet_lock(true);
+    shifted(&mut e, "NHK");
+    e.process_key(&press_key(Keysym::SHIFT_L));
+    e.process_key(&shift_release());
+    type_str(&mut e, "ga");
+    assert_eq!(e.preedit().unwrap().text(), "NHKが");
+}
