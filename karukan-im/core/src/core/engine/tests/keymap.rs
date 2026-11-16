@@ -181,3 +181,55 @@ fn toggle_width_flips_kana_and_alphanumerics() {
     e.process_key(&ctrl('y'));
     assert_eq!(e.preedit().unwrap().text(), "ｋａｎｊｉ");
 }
+
+fn engine_with_shift_tap() -> InputMethodEngine {
+    let mut e = InputMethodEngine::new();
+    e.keymap.keymap = Keymap::parse("[bindings]\n\"Shift\" = \"hiragana_mode\"\n").unwrap();
+    e
+}
+
+fn shift_release() -> KeyEvent {
+    KeyEvent::new(Keysym::SHIFT_L, KeyModifiers::new().with_shift(true), false)
+}
+
+#[test]
+fn shift_tap_leaves_alphabet_mode() {
+    let mut e = engine_with_shift_tap();
+    // Shift+L enters alphabet mode; letting go of Shift is not a tap
+    e.process_key(&press_key(Keysym::SHIFT_L));
+    e.process_key(&press_shift('L'));
+    e.process_key(&shift_release());
+    assert!(e.mode.current() == InputMode::Alphabet);
+    type_str(&mut e, "inux");
+
+    // A bare tap goes back to kana; the release still reaches the app
+    e.process_key(&press_key(Keysym::SHIFT_R));
+    let r = e.process_key(&shift_release());
+    assert!(!r.consumed);
+    assert!(e.mode.current() == InputMode::Hiragana);
+    type_str(&mut e, "ga");
+    assert_eq!(e.preedit().unwrap().text(), "Linuxが");
+}
+
+#[test]
+fn shift_tap_without_binding_does_nothing() {
+    let mut e = engine();
+    e.process_key(&press_shift('L'));
+    e.process_key(&press_key(Keysym::SHIFT_L));
+    e.process_key(&shift_release());
+    assert!(e.mode.current() == InputMode::Alphabet);
+}
+
+#[test]
+fn shift_in_a_chord_is_not_a_tap() {
+    let mut e = engine_with_shift_tap();
+    e.process_key(&press_shift('L'));
+    // Ctrl held while Shift goes down
+    e.process_key(&KeyEvent::new(
+        Keysym::SHIFT_L,
+        KeyModifiers::new().with_control(true),
+        true,
+    ));
+    e.process_key(&shift_release());
+    assert!(e.mode.current() == InputMode::Alphabet);
+}

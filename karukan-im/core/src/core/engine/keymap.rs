@@ -42,6 +42,9 @@ pub(super) enum KeyAction {
     /// katakana ⇄ half-width katakana (hiragana goes to half-width
     /// katakana), full-width ⇄ half-width alphanumerics
     ToggleWidth,
+    /// Back to hiragana input from alphabet/katakana mode (the built-in
+    /// 変換 key; ATOK binds it to a Shift tap)
+    HiraganaMode,
     /// Open the 🤖 AI candidate view (built-in Ctrl+I)
     AiCandidates,
     /// Switch to katakana input mode (built-in Ctrl+K)
@@ -56,6 +59,7 @@ impl KeyAction {
             "alphanumeric_full" => Self::AlphanumericFull,
             "alphanumeric_half" | "alphanumeric" => Self::AlphanumericHalf,
             "toggle_width" => Self::ToggleWidth,
+            "hiragana_mode" => Self::HiraganaMode,
             "ai_candidates" => Self::AiCandidates,
             "katakana_mode" => Self::KatakanaMode,
             _ => return None,
@@ -153,9 +157,14 @@ fn keysym_for_name(name: &str) -> Option<u32> {
         "end" => 0xff57,
         "muhenkan" => 0xff22,
         "henkan" => 0xff23,
+        // Bare "Shift": a tap of either Shift key on its own
+        "shift" => SHIFT_TAP,
         _ => return None,
     })
 }
+
+/// The keysym a bare `"Shift"` binding (a Shift tap) is stored under.
+const SHIFT_TAP: u32 = 0xffe1;
 
 /// The user's bindings.
 #[derive(Debug, Clone, Default)]
@@ -234,6 +243,8 @@ struct Forms {
 pub(super) struct KeymapState {
     pub(super) keymap: Keymap,
     typed: String,
+    /// A Shift key is down and nothing else was pressed since
+    shift_tap_armed: bool,
 }
 
 impl InputMethodEngine {
@@ -254,6 +265,38 @@ impl InputMethodEngine {
         Some(self.run_key_action(action))
     }
 
+    /// Hook run before the modifier keys are passed through: a Shift tap
+    /// (press and release with nothing in between) runs the `"Shift"`
+    /// binding. The release still reaches the application, so its view of
+    /// the Shift state stays right.
+    pub(super) fn process_modifier_tap(&mut self, key: &KeyEvent) -> Option<EngineResult> {
+        if key.keysym != Keysym::SHIFT_L && key.keysym != Keysym::SHIFT_R {
+            if key.is_press {
+                self.keymap.shift_tap_armed = false;
+            }
+            return None;
+        }
+        if key.is_press {
+            let m = &key.modifiers;
+            self.keymap.shift_tap_armed = !(m.control_key || m.alt_key || m.super_key);
+            return None;
+        }
+        if !std::mem::take(&mut self.keymap.shift_tap_armed) {
+            return None;
+        }
+        let tap = Chord {
+            keysym: SHIFT_TAP,
+            control: false,
+            alt: false,
+            shift: false,
+            super_: false,
+        };
+        let action = *self.keymap.keymap.bindings.get(&tap)?;
+        let mut result = self.run_key_action(action);
+        result.consumed = false;
+        Some(result)
+    }
+
     fn record_keystroke(&mut self, key: &KeyEvent) {
         if let Some(c) = key.to_char() {
             self.keymap.typed.push(c);
@@ -267,6 +310,9 @@ impl InputMethodEngine {
             KeyAction::AiCandidates => self.jump_to_source(CandidateSource::Model),
             KeyAction::KatakanaMode => self.enter_katakana_mode(),
             KeyAction::ToggleWidth => self.toggle_width(),
+            KeyAction::HiraganaMode => self
+                .handle_mode_toggle_key(&KeyEvent::press(Keysym::HENKAN))
+                .unwrap_or_else(EngineResult::consumed),
             _ => self.convert_whole(action),
         }
     }

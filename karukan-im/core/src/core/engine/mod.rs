@@ -619,6 +619,10 @@ impl InputMethodEngine {
             );
         }
 
+        if let Some(result) = self.process_modifier_tap(key) {
+            return result;
+        }
+
         // Right Alt/Super/Meta/Hyper: one-way non-Hiragana → Hiragana switch
         if let Some(result) = self.handle_mode_toggle_key(key) {
             return result;

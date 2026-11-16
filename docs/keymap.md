@@ -8,6 +8,7 @@
 "Ctrl+I" = "katakana"
 "Ctrl+P" = "alphanumeric_full"
 "Ctrl+O" = "toggle_width"
+"Shift" = "hiragana_mode"
 ```
 
 読み込むのは起動時だけなので、変更したら `fcitx5 -r` で再起動してください。
@@ -26,6 +27,7 @@
 | `alphanumeric_full` | 打鍵したキーそのものを全角英数にする（`ｋａｎｊｉ`） |
 | `alphanumeric_half` | 打鍵したキーそのものを半角英数にする（`kanji`） |
 | `toggle_width` | 表示中の形の全角・半角を切り替える（ATOK の Ctrl+O）。カタカナ⇄半角カタカナ、全角英数⇄半角英数。ひらがなからは半角カタカナになる。全角・半角の区別がない文字（漢字など）はそのまま |
+| `hiragana_mode` | 英数字モード・カタカナモードからひらがなモードに戻る（組み込みの 変換 キーと同じ。ATOK では Shift 単打） |
 | `ai_candidates` | 🤖AI候補のビューを開く（組み込みの Ctrl+I） |
 | `katakana_mode` | カタカナ入力モードに切り替える（組み込みの Ctrl+K） |
 
@@ -39,5 +41,7 @@
 
 - 修飾キー: `Ctrl`, `Alt`, `Shift`, `Super`
 - キー: 英数字・記号1文字（大文字小文字は区別しない。Shift は `Shift+` で明示する）、`F1`〜`F12`, `Space`, `Tab`, `Enter`, `Escape`, `BackSpace`, `Delete`, `Home`, `End`, `Left`, `Right`, `Up`, `Down`, `Henkan`, `Muhenkan`
+
+修飾キーなしの `"Shift"` だけを書くと、Shift キー（左右どちら）の**単打**を表します。Shift を押して、ほかのキーを挟まずに離したときだけ働きます。Shift+L で英数字モードに入ったときの Shift の離しは単打になりません。単打は入力中でなくても働き、離したことはアプリケーションにも伝わります。
 
 解釈できない行はログに警告を出して無視します。
