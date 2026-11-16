@@ -131,9 +131,10 @@ impl RomajiConverter {
     /// configured width. [`Self::convert`] leaves the width alone because
     /// part of its output is still live keystrokes; here everything settles.
     pub fn convert_flush(&self, raw: &str) -> String {
-        if self.chain.is_some() {
-            // Runs reaching here are already evaluated live tails.
-            return raw.to_string();
+        if let Some(chain) = &self.chain {
+            // Runs reaching here are already evaluated live tails; only
+            // the end-of-text rules are left to apply.
+            return chain.flush_end(raw);
         }
         let Converted { mut text, pending } = self.convert(raw);
         text.push_str(&self.flush_pending(&pending));

@@ -11,6 +11,8 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+mod end;
+
 #[derive(Debug, Clone, Default)]
 pub struct ChainTable {
     rules: HashMap<String, String>,
@@ -18,6 +20,8 @@ pub struct ChainTable {
     /// may still be rewritten by a later keystroke.
     prefixes: HashSet<String>,
     max_key_chars: usize,
+    /// End-of-text rules (`key{composition-separator}`), see [`end`]
+    end_rules: HashMap<String, String>,
 }
 
 impl ChainTable {
@@ -38,6 +42,9 @@ impl ChainTable {
     }
 
     fn insert(&mut self, key: String, value: String) {
+        if self.insert_end_rule(&key, &value) {
+            return;
+        }
         let chars: Vec<char> = key.chars().collect();
         for len in 1..chars.len() {
             self.prefixes.insert(chars[..len].iter().collect());
