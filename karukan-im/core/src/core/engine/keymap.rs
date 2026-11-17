@@ -172,6 +172,9 @@ pub(super) struct Keymap {
     bindings: HashMap<Chord, KeyAction>,
     /// `[options] uppercase_alphabet_lock`, see [`AlphabetLock`]
     uppercase_alphabet_lock: bool,
+    /// `[options] verbose_toggle_only_while_composing`: with nothing
+    /// composed, Ctrl+Shift+V goes to the application (a terminal's paste)
+    verbose_toggle_only_while_composing: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -187,6 +190,8 @@ struct KeymapFile {
 struct KeymapOptions {
     #[serde(default)]
     uppercase_alphabet_lock: bool,
+    #[serde(default)]
+    verbose_toggle_only_while_composing: bool,
 }
 
 impl Keymap {
@@ -228,6 +233,7 @@ impl Keymap {
         Ok(Self {
             bindings,
             uppercase_alphabet_lock: file.options.uppercase_alphabet_lock,
+            verbose_toggle_only_while_composing: file.options.verbose_toggle_only_while_composing,
         })
     }
 
@@ -296,14 +302,25 @@ impl InputMethodEngine {
         Some(self.run_key_action(action))
     }
 
-    /// Hook run before the modifier keys are passed through: a Shift tap
-    /// (press and release with nothing in between) runs the `"Shift"`
-    /// binding. The release still reaches the application, so its view of
-    /// the Shift state stays right.
-    pub(super) fn process_modifier_tap(&mut self, key: &KeyEvent) -> Option<EngineResult> {
+    /// Hook run first, before the modifier keys are passed through and
+    /// before the state-independent shortcuts: a Shift tap (press and
+    /// release with nothing in between) runs the `"Shift"` binding — the
+    /// release still reaches the application, so its view of the Shift
+    /// state stays right — and Ctrl+Shift+V can be left to the application
+    /// while nothing is composed.
+    pub(super) fn process_early_keymap(&mut self, key: &KeyEvent) -> Option<EngineResult> {
         if key.keysym != Keysym::SHIFT_L && key.keysym != Keysym::SHIFT_R {
             if key.is_press {
                 self.keymap.shift_tap_armed = false;
+            }
+            if self.keymap.keymap.verbose_toggle_only_while_composing
+                && key.is_press
+                && matches!(self.state, InputState::Empty)
+                && key.modifiers.control_key
+                && key.modifiers.shift_key
+                && (key.keysym == Keysym::KEY_V || key.keysym == Keysym::KEY_V_UPPER)
+            {
+                return Some(EngineResult::not_consumed());
             }
             return None;
         }

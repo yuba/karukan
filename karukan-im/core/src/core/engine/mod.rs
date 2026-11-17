@@ -619,7 +619,7 @@ impl InputMethodEngine {
             );
         }
 
-        if let Some(result) = self.process_modifier_tap(key) {
+        if let Some(result) = self.process_early_keymap(key) {
             return result;
         }
 

@@ -300,3 +300,34 @@ fn shift_tap_still_leaves_the_uppercase_lock() {
     type_str(&mut e, "ga");
     assert_eq!(e.preedit().unwrap().text(), "NHKが");
 }
+
+#[test]
+fn ctrl_shift_v_reaches_the_app_when_idle_if_asked() {
+    let mut e = InputMethodEngine::new();
+    e.keymap.keymap =
+        Keymap::parse("[options]\nverbose_toggle_only_while_composing = true\n").unwrap();
+    let ctrl_shift_v = KeyEvent::new(
+        Keysym::KEY_V_UPPER,
+        KeyModifiers::new().with_control(true).with_shift(true),
+        true,
+    );
+    // Nothing composed: a terminal's paste, untouched
+    assert!(!e.process_key(&ctrl_shift_v).consumed);
+    assert!(!e.config.verbose);
+    // Composing: still the verbose toggle
+    type_str(&mut e, "ka");
+    assert!(e.process_key(&ctrl_shift_v).consumed);
+    assert!(e.config.verbose);
+}
+
+#[test]
+fn ctrl_shift_v_toggles_verbose_when_idle_by_default() {
+    let mut e = engine();
+    let ctrl_shift_v = KeyEvent::new(
+        Keysym::KEY_V_UPPER,
+        KeyModifiers::new().with_control(true).with_shift(true),
+        true,
+    );
+    assert!(e.process_key(&ctrl_shift_v).consumed);
+    assert!(e.config.verbose);
+}

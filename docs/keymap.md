@@ -58,4 +58,5 @@ uppercase_alphabet_lock = true
 | オプション | 既定 | 内容 |
 |------|------|------|
 | `uppercase_alphabet_lock` | `false` | **大文字英字固定モード**。Shift+英字で英数字モードに入ったあと、Shift を離さずに2文字目の英字を打つと（`NHK`）大文字英字固定モードになります。このモードでは、Shift なしの英字を打った時点でひらがなモードに戻り、その英字がローマ字入力の1文字目になります（`NHK` → `ka` で「NHKか」）。変換キーや `hiragana_mode` を割り当てたキーでも抜けられます。2文字目の前に Shift を離した場合は通常の英数字モードです |
+| `verbose_toggle_only_while_composing` | `false` | 組み込みの Ctrl+Shift+V（詳細表示の切り替え）を入力中・変換中だけにし、何も入力していないときはアプリケーションに渡す。ターミナルの Ctrl+Shift+V 貼り付けと衝突しなくなる |
 
